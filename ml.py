@@ -47,17 +47,17 @@ if __name__ == '__main__':
     print('F1 for log_regression cv=3: {:.2f} \t {}'.format(np.mean(score1), score1))
     print('F1 for log_regression 3*CV: {:.2f} \t {}'.format(np.mean(score2), score2))
 
-    eval_metric = 'f1'
+    eval_metric = 'auc'
     mode = 'Compete'
-    text = '3clinics_base'
+    text = '3clinics_max'
     path = 'Automl_' + mode + '_' + eval_metric + '_' + text
 
     automl = AutoML(results_path=path,
                     mode=mode,
-                    golden_features=False,
-                    features_selection=False,
-                    train_ensemble=False,
-                    stack_models=False,
+                    golden_features=True,
+                    features_selection=True,
+                    train_ensemble=True,
+                    stack_models=True,
                     explain_level=2,
                     eval_metric=eval_metric,
                     ml_task='binary_classification',
@@ -65,7 +65,9 @@ if __name__ == '__main__':
                     )
 
     automl.fit(X, y, sample_weight=None, cv=cv_idx)
+    automl.report()
 
+    automl.predict()
 
 
 
