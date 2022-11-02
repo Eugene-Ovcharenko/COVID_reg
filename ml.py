@@ -54,6 +54,10 @@ if __name__ == '__main__':
 
     automl = AutoML(results_path=path,
                     mode=mode,
+                    model_time_limit=60 * 60,
+                    start_random_models=10,
+                    hill_climbing_steps=10,
+                    top_models_to_improve=10,
                     golden_features=True,
                     features_selection=True,
                     train_ensemble=True,
@@ -67,7 +71,6 @@ if __name__ == '__main__':
     automl.fit(X, y, sample_weight=None, cv=cv_idx)
     automl.report()
 
-    automl.predict()
 
 
 
