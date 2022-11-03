@@ -53,7 +53,7 @@ def get_leaderboard(
 ) -> pd.DataFrame:
     '''
     Read the AutoML mljar-supervised results function.
-    In current version Golden Features, Stacked and Essembly models drop !!!
+    In current version Golden Features, SelectedFeatures, Stacked and Essembly models drop !!!
 
     :param path: name of AutoML folder,
     :param names: list of Automl subfolder names,
@@ -70,6 +70,11 @@ def get_leaderboard(
         df['features_options'] = df['name'].apply(
             lambda n: re.findall('GoldenFeatures', n)[0] if re.findall('GoldenFeatures', n) else "")
         df.drop(df[df['features_options'] == 'GoldenFeatures'].index, inplace=True)
+
+        # DROP Selected Features
+        df['features_options'] = df['name'].apply(
+            lambda n: re.findall('SelectedFeatures', n)[0] if re.findall('SelectedFeatures', n) else "")
+        df.drop(df[df['features_options'] == 'SelectedFeatures'].index, inplace=True)
 
         # DROP Stacked models
         df['features_options'] = df['name'].apply(
@@ -143,7 +148,7 @@ def cv_folds_extractor(
     '''
     Extracting and return validation/train cv_folds from the path
 
-    :param path: path of the model to extract,
+    :param path: path of the folder of CV folds to extract,
     :return: model list for each cv_fold
     '''
 
@@ -166,6 +171,35 @@ def cv_folds_extractor(
     return cv_folds
 
 
+def feature_importance_extractor(
+        path: str
+) -> pd.DataFrame:
+    '''
+    Extracting and return mean SHAP importance values for each cv_fold from the path
+
+    :param path: path of model,
+    :return: shap_values: SHAP importance values for each cv_fold
+    '''
+
+    fe_values = pd.DataFrame()
+    for file in os.listdir(path):
+
+        if file.startswith('learner_fold_') and file.endswith('_importance.csv'):
+            cv_fold_num = re.search(r'learner_fold_\d', file).group(0)
+            f_path = os.path.join(path, file)
+            values = pd.read_csv(f_path, index_col=0, names=[cv_fold_num])
+
+            if (values.loc['feature'] == 'mean_importance').all():
+                values.drop(['feature'], axis=0, inplace=True)
+                values['fold'] = values.columns[0]
+                values.columns = ['mean_importance','fold']
+                values['mean_importance'] = values['mean_importance'].astype(float)
+                fe_values = pd.concat([fe_values, values], axis=0)
+
+    fe_values.reset_index(inplace=True)
+    return fe_values
+
+
 def data_preprocessing(
         path: str,
         X: pd.DataFrame
@@ -182,14 +216,14 @@ def data_preprocessing(
 
     # columns scale
     col_scaled = framework['params']['preprocessing']['columns_preprocessing']
-    col_scaled = [col for col in col_scaled if col_scaled[col] == ['scale_normal']]                                     # TODO: add logscaller !
+    col_scaled = [col for col in col_scaled if col_scaled[col] == ['scale_normal']]
     print('X scaled column: {} \ {}'.format(len(col_scaled), len(X.columns)), end='\t')
     if col_scaled != []:
         scaler = StandardScaler()
         X[col_scaled] = scaler.fit_transform(X[col_scaled])
 
     # drop features
-    if 'drop_features' in framework['preprocessing'][0]:                                                                # TODO: must check !
+    if 'drop_features' in framework['preprocessing'][0]:
         drop_features = framework['preprocessing'][0]['drop_features']
         X.drop(drop_features, axis=1, inplace=True)
         print('dropped features: {} \ {}'.format(len(drop_features), len(X.columns)))
@@ -202,7 +236,8 @@ def data_preprocessing(
 def classifier_evaluation(
         y: pd.Series,
         y_pred: pd.Series,
-        y_prob: pd.Series
+        y_prob: pd.Series,
+        cv: pd.DataFrame = None
 ) -> pd.DataFrame:
     """
     Evaluate the performance of the classifier by standard metrics
@@ -210,6 +245,7 @@ def classifier_evaluation(
     :param y: Ground Truth y
     :param y_pred: predicted values by X data
     :param y_prob: probability of predictions by X data
+    :param cv: numpy array of CV folds: rows train_fold_0, validation_fold_0...
     :return: DataFrame of classifier evaluation metrics
     """
     metric_roc = roc_auc_score(y, y_prob, average=None)
@@ -226,8 +262,30 @@ def classifier_evaluation(
         'Average_Precision': metric_prec_ave,
         'Recall': metric_rec,
         'F1_score': metric_f1
-    })
-    return metrics
+    }, name = 'all_folds')
+    if cv is None:
+        metrics=pd.DataFrame(metrics)
+    else:
+        cv_val = cv[cv.index.str.startswith('validation_fold_')]
+        for fold in cv_val.index:
+            id = cv_val.loc[fold].dropna().astype(int).tolist()
+            metric_roc = roc_auc_score(y[id], y_prob[id], average=None)
+            metric_acc = accuracy_score(y[id], y_pred[id])
+            metric_prec = precision_score(y[id], y_pred[id])
+            metric_prec_ave = average_precision_score(y[id], y_pred[id])
+            metric_rec = recall_score(y[id], y_pred[id])
+            metric_f1 = f1_score(y[id], y_pred[id])
+            fold_metrics = pd.Series({
+                'ROC_AUC': metric_roc,
+                'Accuracy': metric_acc,
+                'Precision': metric_prec,
+                'Average_Precision': metric_prec_ave,
+                'Recall': metric_rec,
+                'F1_score': metric_f1
+            }, name=fold)
+            metrics = pd.concat([metrics, fold_metrics], axis=1)
+
+    return metrics.T
 
 
 def custom_confusion_matrix(
@@ -328,14 +386,6 @@ if __name__ == '__main__':
     y_df = df['Target']
     X_df = df.drop(columns=['Target', 'Clinic', 'Leukocytes day 1'])
 
-    # # define CV folds
-    # cv_idx = []
-    # groups = df['Clinic'].unique()
-    # for group in groups:
-    #     test_id = X[df['Clinic'] == group].index.values
-    #     train_id = X[df['Clinic'].isin(groups[groups != group])].index.values
-    #     cv_idx.append((train_id, test_id))
-
     # create leaderboard of models
     leaderboard = get_leaderboard(fpath='', names=names, load_mode='uniques')
     ldb_metrics = pd.DataFrame() # results of the models testing
@@ -359,6 +409,9 @@ if __name__ == '__main__':
         # load stored NumPy folds for each model
         folds = cv_folds_extractor(m['path'])
         folds = folds[folds.index.str.contains('validation_fold_')].dropna(axis=1, how='all')
+        # CV folds indices preparing
+        cv_idx = []
+        groups = df['Clinic'].unique()
 
         # cv folds loops from automl folds folder
         predictions = pd.DataFrame()
@@ -366,7 +419,6 @@ if __name__ == '__main__':
         for idx, fold in folds.iterrows():
             i_val = fold.dropna().astype(int).values
             i_fold = int(re.search('validation_fold_(\d+)', idx).group(1))
-            # print('\t -> Model:', models[i_fold].__class__.__name__, '|', idx)
             print(i_fold, end='-')
 
             X_val = X.iloc[i_val]
@@ -390,6 +442,9 @@ if __name__ == '__main__':
                 res.set_axis(['y_val', 'y_prob', 'y_pred'], axis=1, inplace=True)
                 predictions = pd.concat([predictions, res], axis=0, sort=False)
 
+            path = 'results\AutoML\confusion_matrix_' + m['name'] + '_' + idx + '.tiff'
+            custom_confusion_matrix(y_val, y_pred, path)
+
         # dump the predictions and probabilities
         print('OK!\n')
         path = 'results\AutoML\predictions_' + m.model_type + '.xlsx'
@@ -400,15 +455,13 @@ if __name__ == '__main__':
         custom_confusion_matrix(predictions.y_val, predictions.y_pred, path)
 
         # model evaluation
+        cv = cv_folds_extractor(m['path'])
         metriсs = classifier_evaluation(predictions.y_val, predictions.y_pred, predictions.y_prob)
-        desc = pd.Series({
-            'name': m['name'],
-            'model_type': model_class,
-            'AUTOML metric': m['metric_value'],
-            'train_time': m['train_time']
-        })
-        ldb = pd.concat([desc, metriсs], axis=0, sort=False)
-        ldb_metrics = pd.concat([ldb_metrics, ldb], axis=1, sort=False, ignore_index=True)
+        metriсs['Model class'] = model_class
+        metriсs['Model name'] = m['name']
+        metriсs['Train time'] = m['train_time']
+        metriсs['AutoML_metric'] = m['metric_value']
+        ldb_metrics = pd.concat([ldb_metrics, metriсs], axis=0, sort=False, ignore_index=False)
 
         # ROC evaluation
         fpr, tpr, thresholds = roc_curve(predictions.y_val, predictions.y_prob)
@@ -420,10 +473,49 @@ if __name__ == '__main__':
             'roc_score': metriсs['ROC_AUC']
         }, ignore_index=True)
 
+        # feature importance analysis
+        path = m['path'] + '\\' + m['name']
+        fi_values = feature_importance_extractor(path)
+
+        # print(fi_values.groupby('index').mean().index.tolist())
+        # fi_values.sort_index(key = fi_values.groupby('index').mean().index.tolist(), inplace=True)
+        # print(fi_values)
+        if 'feature_importance' in globals():
+            fi_values['Model'] = m['model_type']
+            feature_importance = pd.concat([feature_importance, fi_values], axis=0)
+        else:
+            feature_importance = pd.DataFrame()
+
+    path = 'results\AutoML\\feature_importance.xlsx'
+    feature_importance.to_excel(path)
+    fig = plt.figure()
+    ax = sns.stripplot(
+        data=feature_importance,
+        x="mean_importance",
+        y='index',
+        hue='fold',
+        s=2, dodge=True, jitter=False)
+    plt.legend(title='', loc='upper right', labels=['Clinic 1', 'Clinic 2', 'Clinic 3'])
+    plt.tight_layout()
+    fig.savefig('results\AutoML\\feature_importance.tiff', dpi=300, format='tif')
+
+    fig = plt.figure()
+    ax = sns.barplot(
+        data=feature_importance,
+        x="mean_importance",
+        hue='fold',
+        y="index",
+        linewidth=0.1, errorbar="sd", errwidth=0.5, capsize=0.2, dodge=True)
+    plt.legend(title='', loc='upper right', labels=['Clinic 1', 'Clinic 2', 'Clinic 3'])
+    plt.tight_layout()
+    fig.savefig('results\AutoML\\feature_importance2.tiff', dpi=300, format='tif')
+
+    fig = plt.figure()
+
     # export results
     print(ldb_metrics)
     path = 'results\AutoML\\results.xlsx'
-    ldb_metrics.to_excel(path, header=False)
+    ldb_metrics.to_excel(path, header=True)
 
     # ROC curves dump & plot
     path = 'results\AutoML\ROC_curves.xlsx'
