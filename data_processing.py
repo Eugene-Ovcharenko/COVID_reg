@@ -12,14 +12,15 @@ pd.set_option('display.max_columns', 100)
 pd.set_option('display.max_colwidth', None)
 sns.set_context("talk")  # "talk" \ "paper" \ "poster" \ "notebook"
 # sns.set_theme(style="ticks")
-# sns.set(font_scale=1)
-# sns.set_style('white', {'xtick.bottom': True, 'xtick.top': False, 'ytick.left': True, 'ytick.right': False,
-#                         'axes.spines.left': True, 'axes.spines.bottom': True, 'axes.spines.right': True,
-#                         'axes.spines.top': True, 'font.family': 'sans serif', 'font.sans-serif': 'Arial',
-#                         'font.style': 'bold'})
+sns.set(font_scale=1)
+sns.set_style('white', {'xtick.bottom': True, 'xtick.top': False, 'ytick.left': True, 'ytick.right': False,
+                        'axes.spines.left': True, 'axes.spines.bottom': True, 'axes.spines.right': True,
+                        'axes.spines.top': True, 'font.family': 'sans serif', 'font.sans-serif': 'Arial',
+                        'font.style': 'bold'})
 
 colors = 'Set1'
 sns.set_palette(colors)
+
 
 
 def cor_plot(
@@ -53,7 +54,7 @@ def cor_plot(
 if __name__ == '__main__':
 
     # load the dataset
-    df = pd.read_excel('dataset/1.3. data COVID-19.xlsx', sheet_name='United')
+    df = pd.read_excel('dataset\\1.3. data COVID-19.xlsx', sheet_name='United')
     print('Check the duplicates:\n',
           df[df['ID'].duplicated()]['ID'])
     df.set_index('ID', inplace=True)

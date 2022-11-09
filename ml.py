@@ -21,7 +21,6 @@ from supervised import AutoML
 
 warnings.filterwarnings("ignore")
 
-
 if __name__ == '__main__':
 
     # load the dataset
@@ -70,39 +69,3 @@ if __name__ == '__main__':
 
     automl.fit(X, y, sample_weight=None, cv=cv_idx)
     automl.report()
-
-
-
-
-
-
-    # clf = LogisticRegression(random_state=0, max_iter=10000)
-
-    #     y_pred = clf.predict(X_test)
-    #     y_prob = clf.predict_proba(X_test)
-    #
-    #     metric_roc_auc = roc_auc_score(y_test, y_prob[:, 1])
-    #     metric_f1 = f1_score(y_test, y_pred)
-    #     metric_acc = accuracy_score(y_test, y_pred)
-    #     metric_prec = precision_score(y_test, y_pred)
-    #     metric_rec = recall_score(y_test, y_pred)
-    #
-    #     scores.setdefault('ROC_AUC', []).append(metric_roc_auc)
-    #     scores.setdefault('F1', []).append(metric_f1)
-    #     scores.setdefault('ACC', []).append(metric_acc)
-    #     scores.setdefault('PREC', []).append(metric_prec)
-    #     scores.setdefault('REC', []).append(metric_rec)
-    #
-    # scores.setdefault('ROC_AUC_mean', []).append(np.mean(scores['ROC_AUC']))
-    # scores.setdefault('F1_mean', []).append(np.mean(scores['F1']))
-    # scores.setdefault('ACC_mean', []).append(np.mean(scores['ACC']))
-    # scores.setdefault('PREC_mean', []).append(np.mean(scores['PREC']))
-    # scores.setdefault('REC_mean', []).append(np.mean(scores['REC']))
-    #
-    # print(scores)
-    # print('ROC_AUC_mean:{:.2f}'.format(scores['ROC_AUC_mean'][0]))
-    # print('F1_mean:{:.2f}'.format(scores['F1_mean'][0]))
-    # print('Accuracy_mean:{:.2f}'.format(scores['ACC_mean'][0]))
-    # print('Presision_mean:{:.2f}'.format(scores['PREC_mean'][0]))
-    # print('Recall_mean:{:.2f}'.format(scores['REC_mean'][0]))
-

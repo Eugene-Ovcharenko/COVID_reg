@@ -8,6 +8,8 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Optional, Union, List, Literal
+
+from fontTools.feaLib import location
 from supervised import AutoML
 from sklearn.preprocessing import normalize
 from sklearn.preprocessing import StandardScaler
@@ -44,7 +46,7 @@ sns.set_style('white', {'xtick.bottom': True, 'xtick.top': False, 'ytick.left': 
                         'axes.spines.top': True, 'font.family': 'sans serif', 'font.sans-serif': 'Arial',
                         'font.style': 'bold'})
 cmap = plt.cm.get_cmap('coolwarm') # YlGnBu
-
+cmap2 = plt.cm.get_cmap('tab10')
 
 def get_leaderboard(
         fpath: str,
@@ -254,6 +256,8 @@ def classifier_evaluation(
     metric_prec_ave = average_precision_score(y, y_pred)
     metric_rec = recall_score(y, y_pred)
     metric_f1 = f1_score(y, y_pred)
+    metric_specificity = recall_score(y, y_pred, average=None)[0]
+
 
     metrics = pd.Series({
         'ROC_AUC': metric_roc,
@@ -261,7 +265,8 @@ def classifier_evaluation(
         'Precision': metric_prec,
         'Average_Precision': metric_prec_ave,
         'Recall': metric_rec,
-        'F1_score': metric_f1
+        'Specificity': metric_specificity,
+        'F1_score': metric_f1,
     }, name = 'all_folds')
     if cv is None:
         metrics=pd.DataFrame(metrics)
@@ -275,12 +280,14 @@ def classifier_evaluation(
             metric_prec_ave = average_precision_score(y[id], y_pred[id])
             metric_rec = recall_score(y[id], y_pred[id])
             metric_f1 = f1_score(y[id], y_pred[id])
+            metric_specificity = recall_score(y[id], y_pred[id], average=None)[0]
             fold_metrics = pd.Series({
                 'ROC_AUC': metric_roc,
                 'Accuracy': metric_acc,
                 'Precision': metric_prec,
                 'Average_Precision': metric_prec_ave,
                 'Recall': metric_rec,
+                'Specificity': metric_specificity,
                 'F1_score': metric_f1
             }, name=fold)
             metrics = pd.concat([metrics, fold_metrics], axis=1)
@@ -456,11 +463,12 @@ if __name__ == '__main__':
 
         # model evaluation
         cv = cv_folds_extractor(m['path'])
-        metriсs = classifier_evaluation(predictions.y_val, predictions.y_pred, predictions.y_prob)
+        metriсs = classifier_evaluation(predictions.y_val, predictions.y_pred, predictions.y_prob, cv)
         metriсs['Model class'] = model_class
         metriсs['Model name'] = m['name']
         metriсs['Train time'] = m['train_time']
         metriсs['AutoML_metric'] = m['metric_value']
+        metriсs['path'] = m['path']
         ldb_metrics = pd.concat([ldb_metrics, metriсs], axis=0, sort=False, ignore_index=False)
 
         # ROC evaluation
@@ -477,9 +485,6 @@ if __name__ == '__main__':
         path = m['path'] + '\\' + m['name']
         fi_values = feature_importance_extractor(path)
 
-        # print(fi_values.groupby('index').mean().index.tolist())
-        # fi_values.sort_index(key = fi_values.groupby('index').mean().index.tolist(), inplace=True)
-        # print(fi_values)
         if 'feature_importance' in globals():
             fi_values['Model'] = m['model_type']
             feature_importance = pd.concat([feature_importance, fi_values], axis=0)
@@ -510,18 +515,79 @@ if __name__ == '__main__':
     plt.tight_layout()
     fig.savefig('results\AutoML\\feature_importance2.tiff', dpi=300, format='tif')
 
-    fig = plt.figure()
+    fig, axn = plt.subplots(1, 3, figsize=(10,10))
+    for i, ax in enumerate(axn.flat):
+        print(feature_importance)
+        foldid = 'learner_fold_' + str(i)
+        pt = feature_importance[feature_importance['fold']==foldid].pivot_table(index='index', columns='Model', values='mean_importance')
+        ax.title.set_text(foldid)
+        cbar_ax = fig.add_axes([1.10, 0.5, .05, .5])
+        sns.heatmap(pt, ax=ax, cmap='RdPu', annot=False, square=True, linewidths=0.5, cbar=i == 0, vmin=0, vmax=1, cbar_ax=None if i else cbar_ax)
+    fig.tight_layout()
+    path = 'results\AutoML\\feature_importance_matrix.tiff'
+    fig.savefig(path, dpi=200, format='tif')
 
     # export results
-    print(ldb_metrics)
     path = 'results\AutoML\\results.xlsx'
     ldb_metrics.to_excel(path, header=True)
+
+    # chart of model's metrics by metric
+    for metric in ['ROC_AUC', 'Accuracy', 'Precision', 'Average_Precision', 'Recall', 'Specificity', 'F1_score']:
+
+        # export metrics pivot tables
+        ptable = pd.pivot_table(ldb_metrics, columns=['Model class'], index=ldb_metrics.index, values=metric)
+        path = 'results\AutoML\\ptable_' + metric + '.xlsx'
+        ptable.to_excel(path)
+
+        # charts of metrics
+        fig = plt.figure(figsize=(15,5))
+        df_reduced = ldb_metrics[ldb_metrics.index != 'all_folds']
+        order_by_all_sample = \
+            ldb_metrics[ldb_metrics.index == 'all_folds'].sort_values(metric, ascending=False)['Model class'].values
+        order_by_mean_metric =\
+            ptable[ptable.index != 'all_folds'].mean(axis=0).sort_values(ascending=False).index.tolist()
+        ax = sns.barplot(
+            data=df_reduced,
+            x=df_reduced['Model class'],
+            y=metric,
+            hue=df_reduced.index,
+            order=order_by_mean_metric,
+            width=0.75,
+            alpha=0.75,
+            palette=['#2d79aa','#ff8f19','#ff5558']
+        )
+        plt.title(metric)
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, shadow=False, ncol=3)
+        plt.tight_layout()
+        path = 'results\AutoML\\model_for_each_metric_' + metric + '.tiff'
+        fig.savefig(path, dpi=200, format='tif')
+
+    # Accuracy-Precision figure
+    fig = plt.figure()
+    df_reduced = ldb_metrics[ldb_metrics.index != 'all_folds']
+
+    sns.scatterplot(
+        data=df_reduced,
+        x="Specificity",
+        y="Recall",
+        hue=df_reduced.index,
+        palette=['#2d79aa', '#ff8f19', '#ff5558'],
+        alpha=0.75,
+        size='Accuracy',
+        sizes=(20, 200)
+    )
+
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+    plt.legend(bbox_to_anchor=(1.0, 1.0), fancybox=True, shadow=False)
+    plt.tight_layout()
+    path = 'results\AutoML\\Specifity_Recall_Accuracy.tiff'
+    fig.savefig(path, dpi=200, format='tif')
 
     # ROC curves dump & plot
     path = 'results\AutoML\ROC_curves.xlsx'
     roc_ftpr.to_excel(path)
     path = os.path.join('AutoML', 'Analyzed', 'charts')
     multi_roc_curves(roc_ftpr, path=path, format='dot')
-
 
 
