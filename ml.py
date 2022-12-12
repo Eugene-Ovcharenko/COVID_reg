@@ -16,7 +16,7 @@ def main(
         save_dir_prefix: str,
         target: str,
         cv_flag_col: str,
-        drop_X_columns: list,
+        drop_X_columns: [str],
         mode: str,
         metric: str,
         golden_features: bool,

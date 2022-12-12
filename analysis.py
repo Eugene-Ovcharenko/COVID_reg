@@ -1,52 +1,46 @@
 import os
 import warnings
-import pandas as pd
-import numpy as np
 import re
-import joblib
 import json
-import matplotlib.pyplot as plt
-import seaborn as sns
+import argparse
 from typing import Optional, Union, List, Literal
 
-from fontTools.feaLib import location
-from supervised import AutoML
-from sklearn.preprocessing import normalize
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import confusion_matrix
-from sklearn.metrics import classification_report
-from sklearn.model_selection import cross_validate
-from sklearn.metrics import f1_score, accuracy_score, precision_score, average_precision_score, recall_score
-from sklearn.metrics import roc_auc_score
-from sklearn.metrics import roc_curve, auc, precision_recall_curve
-from sklearn.dummy import DummyClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.ensemble import ExtraTreesClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.neural_network import MLPClassifier
+import pandas as pd
+import numpy as np
+import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler, normalize
 from catboost import CatBoostClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from lightgbm import Booster
 import lightgbm as lgb
+from sklearn.metrics import (
+    f1_score,
+    accuracy_score,
+    precision_score,
+    average_precision_score,
+    recall_score,
+    roc_auc_score,
+    roc_curve,
+)
 
-# style settings
+from visualization_tools import (
+    multi_roc_curves,
+    custom_confusion_matrix,
+    feature_importance_chart,
+    feature_importance_folded_chart,
+    ml_models_metric_charts,
+    ml_metric_bubble_chart
+)
+
 warnings.filterwarnings("ignore")
 pd.set_option('display.width', 200)
 pd.set_option('display.max_columns', 100)
 pd.set_option('display.max_colwidth', None)
-sns.set_context("talk")  # \ "paper" \ "poster" \ "notebook"
-# sns.set_style("whitegrid")
-# plt.style.use('seaborn')
-sns.set(font_scale=1)
-sns.set_style('white', {'xtick.bottom': True, 'xtick.top': False, 'ytick.left': True, 'ytick.right': False,
-                        'axes.spines.left': True, 'axes.spines.bottom': True, 'axes.spines.right': True,
-                        'axes.spines.top': True, 'font.family': 'sans serif', 'font.sans-serif': 'Arial',
-                        'font.style': 'bold'})
-cmap = plt.cm.get_cmap('coolwarm') # YlGnBu
-cmap2 = plt.cm.get_cmap('tab10')
+sns.set_context("paper")  # \ "talk" \ "poster" \ "notebook"
+
 
 def get_leaderboard(
         fpath: str,
@@ -55,17 +49,22 @@ def get_leaderboard(
 ) -> pd.DataFrame:
     '''
     Read the AutoML mljar-supervised results function.
-    In current version Golden Features, SelectedFeatures, Stacked and Essembly models drop !!!
+    Golden Features, Selected Features, Stacked and Assembly models are being dropped in the current version.
 
-    :param path: name of AutoML folder,
-    :param names: list of Automl subfolder names,
-    :param load_mode: 'all' (all best models), "uniques" (only one model for each class).
-    :return: leaderboard models DataFrame
+    Args:
+        fpath: name of AutoML folder,
+        names: list of Automl subfolder names,
+        load_mode: 'all' (all best models), "uniques" (only one model for each class).
+    Returns:
+        leaderboard models DataFrame
     '''
+
     leaderboard = pd.DataFrame()
     for name in names:
         path = os.path.join(fpath, name)
-        df = pd.read_csv(path + '\leaderboard.csv')
+        path_ldb = os.path.join(path, 'leaderboard.csv')
+
+        df = pd.read_csv(path_ldb)
         df.sort_values(by=['model_type', 'metric_value'], ascending=False, inplace=True)
 
         # DROP Golden Features
@@ -103,10 +102,14 @@ def get_leaderboard(
         else:
             exit('ERROR: WRONG load_mode. Must be "all" or "uniques" !')
 
-    print('\nModels leaderboard :\n', '-' * 200, '\n',
-          leaderboard[['model_type', 'features_options', 'metric_type', 'metric_value', 'name', 'path']],
-          '\n', '-' * 200)
-    leaderboard.to_excel('results\AutoML\leaderboard.xlsx')
+    print('\nModels leaderboard :\n{}\n{}\n{}\n'.format(
+        ('-' * 200),
+        leaderboard[['model_type', 'features_options', 'metric_type', 'metric_value', 'name', 'path']],
+        ('-' * 200)
+    )
+    )
+
+    leaderboard.to_excel('results\\AutoML\\leaderboard.xlsx')
     return leaderboard
 
 
@@ -116,16 +119,29 @@ def model_extractor(
     '''
     Extracting fitted models from the given path for each cv_fold
 
-    :param path: path of the model to extract,
-    :return: model list for each cv_fold
+    Args:
+        path: path of the model to extract,
+    Returns:
+        list OF MODELS for each cv_fold
     '''
 
     models = []
     for file in os.listdir(path):
         if file.startswith('learner_fold_') and \
-                file.endswith(('.baseline', '.linear', '.k_neighbors', '.decision_tree', '.extra_trees',
-                               '.random_forest', '.xgboost', '.catboost', '.lightgbm', '.neural_network')):
-            f_path = path + '\\' + file
+                file.endswith((
+                        '.baseline',
+                        '.linear',
+                        '.k_neighbors',
+                        '.decision_tree',
+                        '.extra_trees',
+                        '.random_forest',
+                        '.xgboost',
+                        '.catboost',
+                        '.lightgbm',
+                        '.neural_network'
+                )
+                ):
+            f_path = os.path.join(path, file)
 
             if file.endswith('.xgboost'):
                 model = XGBClassifier()
@@ -134,9 +150,7 @@ def model_extractor(
                 model = CatBoostClassifier()
                 model.load_model(f_path)
             elif file.endswith('.lightgbm'):
-                # model = lgb.LGBMClassifier(model_file=f_path)
                 model = lgb.Booster(model_file=f_path)
-
             else:
                 model = joblib.load(f_path)
             models.append(model)
@@ -150,8 +164,10 @@ def cv_folds_extractor(
     '''
     Extracting and return validation/train cv_folds from the path
 
-    :param path: path of the folder of CV folds to extract,
-    :return: model list for each cv_fold
+    Args:
+        path: path of the folder of CV folds to extract,
+    Returns:
+        arrays of  cv_fold
     '''
 
     path = os.path.join(path, 'folds')
@@ -179,10 +195,11 @@ def feature_importance_extractor(
     '''
     Extracting and return mean SHAP importance values for each cv_fold from the path
 
-    :param path: path of model,
-    :return: shap_values: SHAP importance values for each cv_fold
+    Args:
+        path: path of model,
+    Returns:
+        shap_values: SHAP importance values for each cv_fold
     '''
-
     fe_values = pd.DataFrame()
     for file in os.listdir(path):
 
@@ -194,7 +211,7 @@ def feature_importance_extractor(
             if (values.loc['feature'] == 'mean_importance').all():
                 values.drop(['feature'], axis=0, inplace=True)
                 values['fold'] = values.columns[0]
-                values.columns = ['mean_importance','fold']
+                values.columns = ['mean_importance', 'fold']
                 values['mean_importance'] = values['mean_importance'].astype(float)
                 fe_values = pd.concat([fe_values, values], axis=0)
 
@@ -205,21 +222,24 @@ def feature_importance_extractor(
 def data_preprocessing(
         path: str,
         X: pd.DataFrame
-)-> pd.DataFrame:
+) -> pd.DataFrame:
     '''
     Function read the AutoML MLJAR framework and preprocess the data
 
-    :param path: path of the MLJAR framework.json
-    :return: Scaled X DataFrame
+    Args:
+        path: path of the MLJAR framework.json
+    Returns:
+        Scaled X DataFrame
     '''
-    path = path + '\\framework.json'
+    path = os.path.join(path, 'framework.json')
     with open(path, 'r') as f:
         framework = json.load(f)
 
     # columns scale
     col_scaled = framework['params']['preprocessing']['columns_preprocessing']
     col_scaled = [col for col in col_scaled if col_scaled[col] == ['scale_normal']]
-    print('X scaled column: {} \ {}'.format(len(col_scaled), len(X.columns)), end='\t')
+    print(f'X scaled column: {len(col_scaled)} \\ {len(X.columns)}', end='\t')
+
     if col_scaled != []:
         scaler = StandardScaler()
         X[col_scaled] = scaler.fit_transform(X[col_scaled])
@@ -228,7 +248,7 @@ def data_preprocessing(
     if 'drop_features' in framework['preprocessing'][0]:
         drop_features = framework['preprocessing'][0]['drop_features']
         X.drop(drop_features, axis=1, inplace=True)
-        print('dropped features: {} \ {}'.format(len(drop_features), len(X.columns)))
+        print(f'dropped features: {len(drop_features)} \\ {len(X.columns)}')
     else:
         print('| No dropped features found')
 
@@ -244,11 +264,13 @@ def classifier_evaluation(
     """
     Evaluate the performance of the classifier by standard metrics
 
-    :param y: Ground Truth y
-    :param y_pred: predicted values by X data
-    :param y_prob: probability of predictions by X data
-    :param cv: numpy array of CV folds: rows train_fold_0, validation_fold_0...
-    :return: DataFrame of classifier evaluation metrics
+    Args:
+        y: Ground Truth y
+        y_pred: predicted values by X data
+        y_prob: probability of predictions by X data
+        cv: numpy array of CV folds: rows train_fold_0, validation_fold_0...
+    Returns:
+        DataFrame of classifier evaluation metrics
     """
     metric_roc = roc_auc_score(y, y_prob, average=None)
     metric_acc = accuracy_score(y, y_pred)
@@ -257,21 +279,24 @@ def classifier_evaluation(
     metric_rec = recall_score(y, y_pred)
     metric_f1 = f1_score(y, y_pred)
     metric_specificity = recall_score(y, y_pred, average=None)[0]
+    metrics = pd.Series(
+        {
+            'ROC_AUC': metric_roc,
+            'Accuracy': metric_acc,
+            'Precision': metric_prec,
+            'Average_Precision': metric_prec_ave,
+            'Recall': metric_rec,
+            'Specificity': metric_specificity,
+            'F1_score': metric_f1,
+        },
+        name='all_folds'
+    )
 
-
-    metrics = pd.Series({
-        'ROC_AUC': metric_roc,
-        'Accuracy': metric_acc,
-        'Precision': metric_prec,
-        'Average_Precision': metric_prec_ave,
-        'Recall': metric_rec,
-        'Specificity': metric_specificity,
-        'F1_score': metric_f1,
-    }, name = 'all_folds')
     if cv is None:
-        metrics=pd.DataFrame(metrics)
+        metrics = pd.DataFrame(metrics)
     else:
         cv_val = cv[cv.index.str.startswith('validation_fold_')]
+
         for fold in cv_val.index:
             id = cv_val.loc[fold].dropna().astype(int).tolist()
             metric_roc = roc_auc_score(y[id], y_prob[id], average=None)
@@ -281,132 +306,105 @@ def classifier_evaluation(
             metric_rec = recall_score(y[id], y_pred[id])
             metric_f1 = f1_score(y[id], y_pred[id])
             metric_specificity = recall_score(y[id], y_pred[id], average=None)[0]
-            fold_metrics = pd.Series({
-                'ROC_AUC': metric_roc,
-                'Accuracy': metric_acc,
-                'Precision': metric_prec,
-                'Average_Precision': metric_prec_ave,
-                'Recall': metric_rec,
-                'Specificity': metric_specificity,
-                'F1_score': metric_f1
-            }, name=fold)
+            fold_metrics = pd.Series(
+                {
+                    'ROC_AUC': metric_roc,
+                    'Accuracy': metric_acc,
+                    'Precision': metric_prec,
+                    'Average_Precision': metric_prec_ave,
+                    'Recall': metric_rec,
+                    'Specificity': metric_specificity,
+                    'F1_score': metric_f1
+                },
+                name=fold
+            )
             metrics = pd.concat([metrics, fold_metrics], axis=1)
 
     return metrics.T
 
 
-def custom_confusion_matrix(
-        y: pd.Series,
-        y_pred: pd.Series,
-        path: str
-) -> None:
-    """
-    Custom confusion matrix for the given y_Ground_Truth and y_predicted
+def predictions_by_folds(
+        X: pd.DataFrame,
+        y: pd.DataFrame,
+        folds: pd.DataFrame,
+        m: pd.Series,
+        models: list
+) -> pd.DataFrame:
+    '''
+    Make predictions by folds
 
-    :param y_pred: predicted values by X data
-    :param y_prob: probability of predictions by X data
-    :param path: path with file_name for the figure
-    """
-    cf_matrix = confusion_matrix(y, y_pred)
-    fig = plt.figure()
-    group_names = ['True Neg', 'False Pos', 'False Neg', 'True Pos']
-    group_counts = ['{0: 0.0f}'.format(value) for value in cf_matrix.flatten()]
-    group_percentages = ['{0:.2%}'.format(value) for value in cf_matrix.flatten() / np.sum(cf_matrix)]
-    labels = [f'{v1} \n{v2} \n{v3}' for v1, v2, v3 in zip(group_names, group_counts, group_percentages)]
-    labels = np.asarray(labels).reshape(2, 2)
-    sns.heatmap(cf_matrix, annot=labels, fmt='', cmap=cmap)
-    plt.tight_layout()
-    fig.savefig(path, dpi=300, format='tif')
+    Args:
+        X: predictors df
+        y: target df
+        folds: folds df
+        m: model leaderboard data
+        models: classifier model
 
+    Returns:
+        Predictions dataframe
+    '''
 
-def multi_roc_curves(
-        roc_ftpr: pd.DataFrame,
-        path: str,
-        format: Literal['dot', 'rus'] = 'dot'
-) -> None:
-    """
-    Plot ROC-curves for all models for one target
+    predictions = pd.DataFrame()
+    print('Fold #:', end='\t')
+    for idx, fold in folds.iterrows():
+        i_val = fold.dropna().astype(int).values
+        i_fold = int(re.search('validation_fold_(\d+)', idx).group(1))
+        print(i_fold, end='-')
 
-    :param roc_ftpr: True & False Positive Rate for al models
-    :param path: the directory for images save
-    :param format: 'dot' - 0.0 value format, 'rus' - 0,0 value format
-    """
-    fig = plt.figure(figsize=(7, 6))
-    if format == 'dot':
-        for i, roc in roc_ftpr.iterrows():
-            plt.plot(
-                roc.fpr,
-                roc.tpr,
-                color=cmap(i / len(roc_ftpr)),
-                lw=2,
-                label=roc.model + " (AUC = %0.2f)" % roc.roc_score
-            )
-    elif format == 'rus':
-        for i, roc in roc_ftpr.iterrows():
-            plt.plot(
-                roc.fpr,
-                roc.tpr,
-                color=cmap(i / len(roc_ftpr)),
-                lw=2,
-                label='{} (AUC={})'.format(roc.model, str(round(roc.roc_score, 3)).replace('.', ','))
-            )
-    plt.plot([0, 1], [0, 1], color="navy", lw=1, linestyle="--")
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.0])
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
-    plt.xlabel("False Positive Rate", fontsize=18)
-    plt.ylabel("True Positive Rate", fontsize=18)
-    plt.title("ROC ", fontsize=18)
-    plt.legend(loc="lower right")  # prop={'size': 11}
+        X_val = X.iloc[i_val]
+        y_val = y.iloc[i_val]
 
-    if format == 'rus':
-        ax = plt.gca()
-        xticks = np.linspace(ax.get_xlim()[0], ax.get_xlim()[1], len(ax.get_xticklabels()))
-        xticks = [str(round(x, 2)).replace('.', ',') for x in xticks]
-        ax.set_xticklabels(xticks)
-        yticks = np.linspace(ax.get_ylim()[0], ax.get_ylim()[1], len(ax.get_yticklabels()))
-        yticks = [str(round(y, 2)).replace('.', ',') for y in yticks]
-        ax.set_yticklabels(yticks)
+        if m.model_type == 'LightGBM':
+            y_prob = models[i_fold].predict(X_val)
+            y_pred = np.where(y_prob > 0.5, 1, 0)
+            y_prob = pd.DataFrame(data=y_prob, index=y_val.index, columns=['y_prob'])
+            y_pred = pd.DataFrame(data=y_pred, index=y_val.index, columns=['y_pred'])
+            res = pd.concat([y_val, y_prob, y_pred], axis=1, ignore_index=False, sort=False)
+            res.set_axis(['y_val', 'y_prob', 'y_pred'], axis=1, inplace=True)
+            predictions = pd.concat([predictions, res], axis=0, sort=False)
 
-    plt.tight_layout()
-    path = 'results\AutoML\\roc_curves_' + '.tiff'
-    fig.savefig(path, dpi=300, format='tif')
+        else:
+            y_pred = models[i_fold].predict(X_val)
+            y_prob = models[i_fold].predict_proba(X_val)[:, 1]
+            y_pred = pd.DataFrame(data=y_pred, index=y_val.index, columns=['y_pred'])
+            y_prob = pd.DataFrame(data=y_prob, index=y_val.index, columns=['y_prob'])
+            res = pd.concat([y_val, y_prob, y_pred], axis=1, ignore_index=False, sort=False)
+            res.set_axis(['y_val', 'y_prob', 'y_pred'], axis=1, inplace=True)
+            predictions = pd.concat([predictions, res], axis=0, sort=False)
+
+    print('OK!\n')
+    return predictions
 
 
-if __name__ == '__main__':
-
-    # main params
-    names=['Automl_Compete_auc_3clinics_max',
-           'Automl_Compete_auc_3clinics_max_best',
-           'Automl_Optuna_auc_3clinics_max']
-
+def main(
+        data_path: str,
+        target: str,
+        cv_flag_col: str,
+        drop_X_columns: [str],
+        automl_folders: List[str],
+        result_path: str,
+):
     # make folders for results store
-    path = 'Results\AutoML'
-    os.makedirs(path, exist_ok=True)
+    os.makedirs(result_path, exist_ok=True)
 
     # load prepared data
-    df = pd.read_excel('dataset/prepared_data.xlsx', sheet_name='prepared_data', index_col=0)
-
-    # define X & y
+    df = pd.read_excel(data_path, index_col=0)
     df.reset_index(inplace=True, drop=True)
-    y_df = df['Target']
-    X_df = df.drop(columns=['Target', 'Clinic', 'Leukocytes day 1'])
+    y_df = df['Target'].copy()
+    X_df = df.copy().drop(columns=[target, cv_flag_col])
+    X_df = X_df.drop(columns=drop_X_columns)
 
     # create leaderboard of models
-    leaderboard = get_leaderboard(fpath='', names=names, load_mode='uniques')
-    ldb_metrics = pd.DataFrame() # results of the models testing
-    roc_ftpr = pd.DataFrame() # df for roc curves dumping
+    leaderboard = get_leaderboard(fpath='', names= automl_folders, load_mode='uniques')
 
-    # model loop
+    # loop for models
     for _, m in leaderboard.iterrows():
-        print('Model:', m.model_type)
+        print(f'Model:{m.model_type}')
 
         # model extract
-        path = m['path'] + '\\' + m['name']
+        path = os.path.join(m['path'], m['name'])
         models = model_extractor(path)
         model_class = models[0].__class__.__name__
-        predictions = pd.DataFrame()
 
         # data preprocessing
         X = X_df.copy()
@@ -416,49 +414,16 @@ if __name__ == '__main__':
         # load stored NumPy folds for each model
         folds = cv_folds_extractor(m['path'])
         folds = folds[folds.index.str.contains('validation_fold_')].dropna(axis=1, how='all')
-        # CV folds indices preparing
-        cv_idx = []
-        groups = df['Clinic'].unique()
 
-        # cv folds loops from automl folds folder
-        predictions = pd.DataFrame()
-        print('Fold #:', end='\t')
-        for idx, fold in folds.iterrows():
-            i_val = fold.dropna().astype(int).values
-            i_fold = int(re.search('validation_fold_(\d+)', idx).group(1))
-            print(i_fold, end='-')
-
-            X_val = X.iloc[i_val]
-            y_val = y.iloc[i_val]
-
-            if m.model_type == 'LightGBM':
-                y_prob = models[i_fold].predict(X_val)
-                y_pred = np.where(y_prob > 0.5, 1, 0)
-                y_prob = pd.DataFrame(data=y_prob, index=y_val.index, columns=['y_prob'])
-                y_pred = pd.DataFrame(data=y_pred, index=y_val.index, columns=['y_pred'])
-                res = pd.concat([y_val, y_prob, y_pred], axis=1, ignore_index=False, sort=False)
-                res.set_axis(['y_val', 'y_prob', 'y_pred'], axis=1, inplace=True)
-                predictions = pd.concat([predictions, res], axis=0, sort=False)
-
-            else:
-                y_pred = models[i_fold].predict(X_val)
-                y_prob = models[i_fold].predict_proba(X_val)[:, 1]
-                y_pred = pd.DataFrame(data=y_pred, index=y_val.index, columns=['y_pred'])
-                y_prob = pd.DataFrame(data=y_prob, index=y_val.index, columns=['y_prob'])
-                res = pd.concat([y_val, y_prob, y_pred], axis=1, ignore_index=False, sort=False)
-                res.set_axis(['y_val', 'y_prob', 'y_pred'], axis=1, inplace=True)
-                predictions = pd.concat([predictions, res], axis=0, sort=False)
-
-            path = 'results\AutoML\confusion_matrix_' + m['name'] + '_' + idx + '.tiff'
-            custom_confusion_matrix(y_val, y_pred, path)
-
-        # dump the predictions and probabilities
-        print('OK!\n')
-        path = 'results\AutoML\predictions_' + m.model_type + '.xlsx'
+          # cv folds loops from automl folds folder
+        predictions = predictions_by_folds(X, y, folds, m, models)
+        fname = 'predictions_' + m.model_type + '.xlsx'
+        path = os.path.join('results', 'AutoML', fname)
         predictions.to_excel(path)
 
         # confusion matrix
-        path = 'results\AutoML\confusion_matrix_' + m['name'] + '.tiff'
+        fname = 'confusion_matrix_' + m['name'] + '.tiff'
+        path = os.path.join('results', 'AutoML', fname)
         custom_confusion_matrix(predictions.y_val, predictions.y_pred, path)
 
         # model evaluation
@@ -469,9 +434,14 @@ if __name__ == '__main__':
         metriсs['Train time'] = m['train_time']
         metriсs['AutoML_metric'] = m['metric_value']
         metriсs['path'] = m['path']
-        ldb_metrics = pd.concat([ldb_metrics, metriсs], axis=0, sort=False, ignore_index=False)
+        if 'ldb_metrics' not in locals():
+            ldb_metrics = pd.DataFrame(metriсs)  # results of the models testing
+        else:
+            ldb_metrics = pd.concat([ldb_metrics, metriсs], axis=0, sort=False, ignore_index=False)
 
         # ROC evaluation
+        if 'roc_ftpr' not in locals():
+            roc_ftpr = pd.DataFrame()
         fpr, tpr, thresholds = roc_curve(predictions.y_val, predictions.y_prob)
         roc_ftpr = roc_ftpr.append({
             'model': model_class,
@@ -482,112 +452,80 @@ if __name__ == '__main__':
         }, ignore_index=True)
 
         # feature importance analysis
-        path = m['path'] + '\\' + m['name']
+        path = os.path.join(m['path'], m['name'])
         fi_values = feature_importance_extractor(path)
-
-        if 'feature_importance' in globals():
+        if 'feature_importance' in locals():
             fi_values['Model'] = m['model_type']
             feature_importance = pd.concat([feature_importance, fi_values], axis=0)
         else:
-            feature_importance = pd.DataFrame()
+            feature_importance = pd.DataFrame(fi_values)
 
-    path = 'results\AutoML\\feature_importance.xlsx'
-    feature_importance.to_excel(path)
-    fig = plt.figure()
-    ax = sns.stripplot(
-        data=feature_importance,
-        x="mean_importance",
-        y='index',
-        hue='fold',
-        s=2, dodge=True, jitter=False)
-    plt.legend(title='', loc='upper right', labels=['Clinic 1', 'Clinic 2', 'Clinic 3'])
-    plt.tight_layout()
-    fig.savefig('results\AutoML\\feature_importance.tiff', dpi=300, format='tif')
+    # path of directory for results export
+    path = os.path.join('results', 'AutoML')
 
-    fig = plt.figure()
-    ax = sns.barplot(
-        data=feature_importance,
-        x="mean_importance",
-        hue='fold',
-        y="index",
-        linewidth=0.1, errorbar="sd", errwidth=0.5, capsize=0.2, dodge=True)
-    plt.legend(title='', loc='upper right', labels=['Clinic 1', 'Clinic 2', 'Clinic 3'])
-    plt.tight_layout()
-    fig.savefig('results\AutoML\\feature_importance2.tiff', dpi=300, format='tif')
+    # export of feature importance table data
+    subpath = os.path.join(path, 'feature_importance.xlsx')
+    feature_importance.to_excel(subpath)
 
-    fig, axn = plt.subplots(1, 3, figsize=(10,10))
-    for i, ax in enumerate(axn.flat):
-        print(feature_importance)
-        foldid = 'learner_fold_' + str(i)
-        pt = feature_importance[feature_importance['fold']==foldid].pivot_table(index='index', columns='Model', values='mean_importance')
-        ax.title.set_text(foldid)
-        cbar_ax = fig.add_axes([1.10, 0.5, .05, .5])
-        sns.heatmap(pt, ax=ax, cmap='RdPu', annot=False, square=True, linewidths=0.5, cbar=i == 0, vmin=0, vmax=1, cbar_ax=None if i else cbar_ax)
-    fig.tight_layout()
-    path = 'results\AutoML\\feature_importance_matrix.tiff'
-    fig.savefig(path, dpi=200, format='tif')
+    # export of ml analysis table data
+    subpath = os.path.join(path, 'results.xlsx')
+    ldb_metrics.to_excel(subpath, header=True)
 
-    # export results
-    path = 'results\AutoML\\results.xlsx'
-    ldb_metrics.to_excel(path, header=True)
+    # ROC curves chart
+    multi_roc_curves(roc_ftpr, save_dir=path, format='dot')
 
-    # chart of model's metrics by metric
-    for metric in ['ROC_AUC', 'Accuracy', 'Precision', 'Average_Precision', 'Recall', 'Specificity', 'F1_score']:
+    # plot feature importance chart
+    feature_importance_chart(feature_importance, path, format='strip')
 
-        # export metrics pivot tables
-        ptable = pd.pivot_table(ldb_metrics, columns=['Model class'], index=ldb_metrics.index, values=metric)
-        path = 'results\AutoML\\ptable_' + metric + '.xlsx'
-        ptable.to_excel(path)
-
-        # charts of metrics
-        fig = plt.figure(figsize=(15,5))
-        df_reduced = ldb_metrics[ldb_metrics.index != 'all_folds']
-        order_by_all_sample = \
-            ldb_metrics[ldb_metrics.index == 'all_folds'].sort_values(metric, ascending=False)['Model class'].values
-        order_by_mean_metric =\
-            ptable[ptable.index != 'all_folds'].mean(axis=0).sort_values(ascending=False).index.tolist()
-        ax = sns.barplot(
-            data=df_reduced,
-            x=df_reduced['Model class'],
-            y=metric,
-            hue=df_reduced.index,
-            order=order_by_mean_metric,
-            width=0.75,
-            alpha=0.75,
-            palette=['#2d79aa','#ff8f19','#ff5558']
-        )
-        plt.title(metric)
-        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2), fancybox=True, shadow=False, ncol=3)
-        plt.tight_layout()
-        path = 'results\AutoML\\model_for_each_metric_' + metric + '.tiff'
-        fig.savefig(path, dpi=200, format='tif')
-
-    # Accuracy-Precision figure
-    fig = plt.figure()
-    df_reduced = ldb_metrics[ldb_metrics.index != 'all_folds']
-
-    sns.scatterplot(
-        data=df_reduced,
-        x="Specificity",
-        y="Recall",
-        hue=df_reduced.index,
-        palette=['#2d79aa', '#ff8f19', '#ff5558'],
-        alpha=0.75,
-        size='Accuracy',
-        sizes=(20, 200)
+    # plot feature importance by folds chart
+    feature_importance_folded_chart(
+        feature_importance=feature_importance,
+        save_dir=path,
     )
 
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.0])
-    plt.legend(bbox_to_anchor=(1.0, 1.0), fancybox=True, shadow=False)
-    plt.tight_layout()
-    path = 'results\AutoML\\Specifity_Recall_Accuracy.tiff'
-    fig.savefig(path, dpi=200, format='tif')
+    # chart of model's metrics by metric
+    list_of_metrics = ['ROC_AUC', 'Accuracy', 'Precision', 'Average_Precision', 'Recall', 'Specificity', 'F1_score']
+    ml_models_metric_charts(
+        ldb_metrics=ldb_metrics,
+        list_of_metrics=list_of_metrics,
+        save_dir=path,
+        export_pivot_tables=True,
+        palette=['#2d79aa', '#ff8f19', '#ff5558'],
+    )
 
-    # ROC curves dump & plot
-    path = 'results\AutoML\ROC_curves.xlsx'
-    roc_ftpr.to_excel(path)
-    path = os.path.join('AutoML', 'Analyzed', 'charts')
-    multi_roc_curves(roc_ftpr, path=path, format='dot')
+    # Accuracy-Precision figure
+    ml_metric_bubble_chart(
+        ldb_metrics=ldb_metrics,
+        save_dir=path,
+        palette=['#2d79aa', '#ff8f19', '#ff5558'],
+    )
 
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='AutoML result analysis module')
+
+    parser.add_argument('--data_path', default='dataset/prepared_data.xlsx', type=str)
+    parser.add_argument('--target', default='Target', type=str, help='Target column')
+    parser.add_argument('--cv_flag_col', default='Clinic', type=str, help='Clinic column')
+    parser.add_argument('--drop_X_columns', default=['Leukocytes day 1'], type=list)
+    parser.add_argument('--automl_folders',
+                        default=[
+                            'Automl_Compete_auc_3clinics_max',
+                            'Automl_Compete_auc_3clinics_max_best',
+                            'Automl_Optuna_auc_3clinics_max'
+                        ],
+                        type=list
+    )
+    parser.add_argument('--result_path', default='Results\\AutoML', type=str)
+
+    args = parser.parse_args()
+
+    main(
+        data_path=args.data_path,
+        target=args.target,
+        cv_flag_col=args.cv_flag_col,
+        drop_X_columns=args.drop_X_columns,
+        automl_folders=args.automl_folders,
+        result_path=args.result_path,
+    )
 
