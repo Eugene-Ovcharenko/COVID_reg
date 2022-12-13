@@ -327,7 +327,7 @@ def feature_importance_folded_chart(
         feature_importance: pd.DataFrame,
         save_dir: str,
         palette: str = 'RdPu',
-        figsize: tuple = (10, 8)
+        figsize: tuple = (10, 10)
 ) -> None:
     '''
 
@@ -335,7 +335,7 @@ def feature_importance_folded_chart(
         feature_importance: feature_importance data
         save_dir: the directory for images save,
         palette: 'default' to blue-red palette or matplotolib palette name,
-        figsize: figure size (x, y) - 10x8 default
+        figsize: figure size (x, y) - 10x10 default
 
     Returns:
         None
@@ -344,7 +344,7 @@ def feature_importance_folded_chart(
     fold_number = len(feature_importance['fold'].unique())
 
     # heatmaps
-    fig, axn = plt.subplots(1, fold_number, figsize=figsize)
+    fig, axn = plt.subplots(1, fold_number, figsize=figsize, constrained_layout=True)
     for i, ax in enumerate(axn.flat):
         foldid = 'learner_fold_' + str(i)
         fe_fold = feature_importance[feature_importance['fold'] == foldid].pivot_table(
@@ -363,9 +363,10 @@ def feature_importance_folded_chart(
             cbar=False,
             vmin=0,
             vmax=1,
-            yticklabels=False
+            yticklabels = (i==0),
         )
         ax.set_ylabel('')
+        ax.set_xlabel('')
 
     # color bar
     cmap = plt.get_cmap(palette)
@@ -373,11 +374,10 @@ def feature_importance_folded_chart(
     sm = ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
     fig.colorbar(sm, ax=axn, shrink=0.5)
+    # plt.tight_layout()
 
-    fig.tight_layout(rect=[0, 0, 0.6, 0])
-
-    save_dir = os.path.join(save_dir, 'feature_importance_matrix.tiff')
-    fig.savefig(save_dir, dpi=300, format='tif')
+    save_dir = os.path.join(save_dir, 'feature_importance_matrix.jpg')
+    fig.savefig(save_dir, dpi=100, format='jpeg')
 
 
 def ml_models_metric_charts(
