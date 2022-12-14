@@ -20,3 +20,8 @@ visualization_tools.py | utilities for the data visualization
   ML classification metrics
   <img src="media/Metrics.jpg">
 </p>
+
+<p align="center">
+  Feature Importance Heatmap of 3-custom-fold cross-validation
+  <img src="media/feature_importance_matrix.jpg">
+</p>
